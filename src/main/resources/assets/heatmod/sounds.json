@@ -1,0 +1,11 @@
+{
+  "dead_heat_pulse": {
+    "subtitle": "Heat Overdrive",
+    "sounds": [
+      {
+        "name": "heatmod:dead_heat_pulse",
+        "stream": true
+      }
+    ]
+  }
+}
