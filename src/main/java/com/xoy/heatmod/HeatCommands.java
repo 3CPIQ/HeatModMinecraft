@@ -1,6 +1,7 @@
 package com.xoy.heatmod;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -34,6 +35,20 @@ public final class HeatCommands {
                         .then(Commands.literal("status").executes(ctx -> {
                             ctx.getSource().sendSuccess(() -> Component.literal("Heat Overdrive: " + (HeatOverdriveManager.isActive() ? "ACTIVE" : "OFF")), false);
                             return 1;
-                        }))));
+                        })))
+                .then(Commands.literal("gamerule")
+                        .then(Commands.literal("doHeatResistence")
+                                .executes(ctx -> {
+                                    boolean value = HeatOverdriveManager.doHeatResistence();
+                                    ctx.getSource().sendSuccess(() -> Component.literal("doHeatResistence = " + value), false);
+                                    return value ? 1 : 0;
+                                })
+                                .then(Commands.argument("value", BoolArgumentType.bool())
+                                        .executes(ctx -> {
+                                            boolean value = BoolArgumentType.getBool(ctx, "value");
+                                            HeatOverdriveManager.setDoHeatResistence(ctx.getSource().getServer(), value);
+                                            ctx.getSource().sendSuccess(() -> Component.literal("doHeatResistence set to " + value), true);
+                                            return 1;
+                                        })))));
     }
 }
