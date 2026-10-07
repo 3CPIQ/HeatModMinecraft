@@ -226,7 +226,7 @@ public final class HeatOverdriveManager {
         level.sendParticles(ParticleTypes.EXPLOSION, x, y, z, 22, 2.4, 2.4, 2.4, .2);
         level.sendParticles(ParticleTypes.LARGE_SMOKE, x, y, z, 145, 3.5, 3.5, 3.5, .17);
         level.sendParticles(ParticleTypes.FLAME, x, y, z, 210, 3.3, 4.0, 3.3, .38);
-        level.sendParticles(ParticleTypes.LAVA, x, y, z, 150, 3.4, 4.4, 3.4, .44);
+        level.sendParticles(ParticleTypes.LAVA, x, y, z, 115, 3.4, 4.2, 3.4, .42);
         level.sendParticles(ParticleTypes.ASH, x, y, z, 120, 4.5, 4.5, 4.5, .10);
         for (int i = 1; i <= 8; i++) {
             double bx = x + outward.getStepX() * i * 1.05;
@@ -234,7 +234,7 @@ public final class HeatOverdriveManager {
             double bz = z + outward.getStepZ() * i * 1.05;
             double spread = .2 + i * .2;
             level.sendParticles(ParticleTypes.FLAME, bx, by, bz, 24, spread, spread, spread, .27);
-            level.sendParticles(ParticleTypes.LAVA, bx, by, bz, 18, spread, spread, spread, .34);
+            level.sendParticles(ParticleTypes.LAVA, bx, by, bz, 12, spread, spread, spread, .30);
             if ((i & 1) == 0) level.sendParticles(ParticleTypes.EXPLOSION, bx, by, bz, 2, spread, spread, spread, .05);
         }
     }
@@ -273,9 +273,9 @@ public final class HeatOverdriveManager {
     }
 
     private static void seedRuptureLava(ServerLevel level, BlockPos center, int radius, RandomSource random) {
-        int attempts = 30 + radius * 10;
+        int attempts = 12 + radius * 4;
         for (int i = 0; i < attempts; i++) {
-            int spread = radius + 2;
+            int spread = radius + 1;
             BlockPos p = center.offset(
                     random.nextInt(spread * 2 + 1) - spread,
                     random.nextInt(spread * 2 + 1) - spread,
@@ -290,30 +290,35 @@ public final class HeatOverdriveManager {
                 BlockState neighbor = level.getBlockState(p.relative(dir));
                 if (!neighbor.isAir() && neighbor.getFluidState().isEmpty()) solidFaces++;
             }
-            if (solidFaces > 0 && random.nextFloat() < .78F) {
+            if (solidFaces > 0 && random.nextFloat() < .34F) {
                 level.setBlock(p, Blocks.LAVA.defaultBlockState(), 3);
-                level.sendParticles(ParticleTypes.LAVA, p.getX() + .5, p.getY() + .5, p.getZ() + .5, 8, .5, .8, .5, .18);
+                level.sendParticles(ParticleTypes.LAVA, p.getX() + .5, p.getY() + .5, p.getZ() + .5, 6, .45, .7, .45, .16);
             }
         }
     }
 
     private static void seedLavaCore(ServerLevel level, RuptureTarget target, int radius, RandomSource random) {
+        if (random.nextFloat() > .55F) return;
+
         Direction inward = target.outward().getOpposite();
         BlockPos core = target.pos().relative(inward, Math.max(1, radius / 2));
-        int coreRadius = Math.max(1, radius - 2);
+        int coreRadius = radius >= 5 ? 2 : 1;
+        int placed = 0;
+        int maxSources = radius >= 5 ? 4 : 2;
 
-        for (int dx = -coreRadius; dx <= coreRadius; dx++) {
-            for (int dz = -coreRadius; dz <= coreRadius; dz++) {
+        for (int dx = -coreRadius; dx <= coreRadius && placed < maxSources; dx++) {
+            for (int dz = -coreRadius; dz <= coreRadius && placed < maxSources; dz++) {
                 if (dx * dx + dz * dz > coreRadius * coreRadius) continue;
-                for (int dy = -coreRadius; dy <= coreRadius; dy++) {
+                for (int dy = -1; dy <= 1; dy++) {
                     BlockPos p = core.offset(dx, dy, dz);
                     if (!level.hasChunkAt(p)) continue;
                     BlockState state = level.getBlockState(p);
                     if (!state.isAir() && !state.canBeReplaced()) continue;
 
                     BlockState below = level.getBlockState(p.below());
-                    if (!below.isAir() && below.getFluidState().isEmpty() && random.nextFloat() < .68F) {
+                    if (!below.isAir() && below.getFluidState().isEmpty() && random.nextFloat() < .35F) {
                         level.setBlock(p, Blocks.LAVA.defaultBlockState(), 3);
+                        placed++;
                         break;
                     }
                 }
@@ -322,10 +327,11 @@ public final class HeatOverdriveManager {
     }
 
     private static void splashLavaAround(ServerLevel level, BlockPos origin, int radius, RandomSource random) {
-        if (level.dimensionType().hasCeiling()) return;
-        for (int i = 0; i < 10 + random.nextInt(8); i++) {
+        if (level.dimensionType().hasCeiling() || random.nextFloat() > .55F) return;
+        int splashes = 2 + random.nextInt(3);
+        for (int i = 0; i < splashes; i++) {
             double angle = random.nextDouble() * Math.PI * 2.0;
-            int distance = radius + 2 + random.nextInt(radius + 10);
+            int distance = radius + 2 + random.nextInt(radius + 7);
             int x = origin.getX() + Mth.floor(Math.cos(angle) * distance);
             int z = origin.getZ() + Mth.floor(Math.sin(angle) * distance);
             int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
@@ -334,8 +340,8 @@ public final class HeatOverdriveManager {
             BlockState here = level.getBlockState(landing);
             if ((here.isAir() || here.canBeReplaced()) && level.getBlockEntity(landing.below()) == null) {
                 level.setBlock(landing, Blocks.LAVA.defaultBlockState(), 3);
-                level.sendParticles(ParticleTypes.LAVA, landing.getX() + .5, landing.getY() + 1.0, landing.getZ() + .5, 28, 1.4, 2.8, 1.4, .34);
-                level.sendParticles(ParticleTypes.FLAME, landing.getX() + .5, landing.getY() + 1.0, landing.getZ() + .5, 30, 1.4, 1.8, 1.4, .22);
+                level.sendParticles(ParticleTypes.LAVA, landing.getX() + .5, landing.getY() + 1.0, landing.getZ() + .5, 18, 1.1, 2.0, 1.1, .28);
+                level.sendParticles(ParticleTypes.FLAME, landing.getX() + .5, landing.getY() + 1.0, landing.getZ() + .5, 20, 1.1, 1.3, 1.1, .18);
             }
         }
     }
@@ -358,23 +364,27 @@ public final class HeatOverdriveManager {
 
     private static void convertWaterNearby(ServerLevel level, ServerPlayer player) {
         RandomSource random = level.random;
+        if (random.nextInt(3) != 0) return;
+
         BlockPos base = player.blockPosition();
         int changed = 0;
-        for (int attempt = 0; attempt < 60 && changed < 5; attempt++) {
+        for (int attempt = 0; attempt < 28 && changed < 1; attempt++) {
             BlockPos p = base.offset(random.nextInt(49) - 24, random.nextInt(19) - 9, random.nextInt(49) - 24);
             if (!level.hasChunkAt(p) || !level.getFluidState(p).is(Fluids.WATER)) continue;
-            int radius = 4 + random.nextInt(3);
+            int radius = 2 + random.nextInt(2);
             for (int dx = -radius; dx <= radius; dx++) {
                 for (int dz = -radius; dz <= radius; dz++) {
                     if (dx * dx + dz * dz > radius * radius) continue;
-                    for (int dy = -2; dy <= 2; dy++) {
+                    for (int dy = -1; dy <= 1; dy++) {
                         BlockPos q = p.offset(dx, dy, dz);
-                        if (level.hasChunkAt(q) && level.getFluidState(q).is(Fluids.WATER)) level.setBlock(q, Blocks.LAVA.defaultBlockState(), 3);
+                        if (level.hasChunkAt(q) && level.getFluidState(q).is(Fluids.WATER) && random.nextFloat() < .65F) {
+                            level.setBlock(q, Blocks.LAVA.defaultBlockState(), 3);
+                        }
                     }
                 }
             }
-            level.sendParticles(ParticleTypes.CLOUD, p.getX() + .5, p.getY() + 1.0, p.getZ() + .5, 80, 3.6, 1.8, 3.6, .12);
-            level.sendParticles(ParticleTypes.LAVA, p.getX() + .5, p.getY() + 1.0, p.getZ() + .5, 24, 2.4, 1.6, 2.4, .20);
+            level.sendParticles(ParticleTypes.CLOUD, p.getX() + .5, p.getY() + 1.0, p.getZ() + .5, 45, 2.3, 1.2, 2.3, .09);
+            level.sendParticles(ParticleTypes.LAVA, p.getX() + .5, p.getY() + 1.0, p.getZ() + .5, 12, 1.5, 1.1, 1.5, .16);
             changed++;
         }
     }
