@@ -34,12 +34,27 @@ import java.util.UUID;
 public final class HeatOverdriveManager {
     private static final Map<UUID, Float> HEAT = new HashMap<>();
     private static boolean active;
+    private static boolean doHeatResistence = true;
     private static int worldTick;
 
     private HeatOverdriveManager() {}
 
     public static boolean isActive() {
         return active;
+    }
+
+    public static boolean doHeatResistence() {
+        return doHeatResistence;
+    }
+
+    public static void setDoHeatResistence(MinecraftServer server, boolean value) {
+        doHeatResistence = value;
+        if (!value) {
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                HEAT.put(player.getUUID(), 100.0F);
+                sync(player, 100.0F);
+            }
+        }
     }
 
     public static void start(MinecraftServer server) {
@@ -70,12 +85,20 @@ public final class HeatOverdriveManager {
         ServerLevel level = player.serverLevel();
         UUID id = player.getUUID();
         float heat = HEAT.getOrDefault(id, 100.0F);
-        boolean cooling = player.isInWaterOrBubble() || level.isRainingAt(player.blockPosition());
-        heat = cooling ? Math.min(100.0F, heat + 0.9F) : Math.max(0.0F, heat - 0.15F);
-        HEAT.put(id, heat);
+
+        if (doHeatResistence) {
+            boolean cooling = player.isInWaterOrBubble() || level.isRainingAt(player.blockPosition());
+            heat = cooling ? Math.min(100.0F, heat + 0.9F) : Math.max(0.0F, heat - 0.15F);
+            HEAT.put(id, heat);
+            if (heat <= 0.0F && player.tickCount % 10 == 0) {
+                player.hurt(level.damageSources().generic(), 1.0F);
+            }
+        } else {
+            heat = 100.0F;
+            HEAT.put(id, heat);
+        }
 
         if ((worldTick & 3) == 0) sync(player, heat);
-        if (heat <= 0.0F && player.tickCount % 10 == 0) player.hurt(level.damageSources().generic(), 1.0F);
 
         RandomSource random = level.random;
         if (worldTick % 10 == 0) {
@@ -111,13 +134,8 @@ public final class HeatOverdriveManager {
         RuptureTarget target = findNearbyRuptureTarget(level, player, random);
         if (target == null) return;
 
-        int radius;
         float roll = random.nextFloat();
-        if (roll < .05F) radius = 6;
-        else if (roll < .28F) radius = 5;
-        else if (roll < .68F) radius = 4;
-        else radius = 3;
-
+        int radius = roll < .05F ? 6 : roll < .28F ? 5 : roll < .68F ? 4 : 3;
         BlockPos origin = target.pos();
         Direction outward = target.outward();
         double x = origin.getX() + .5 + outward.getStepX() * .7;
@@ -138,8 +156,8 @@ public final class HeatOverdriveManager {
         for (ServerPlayer nearby : level.players()) {
             double dist = nearby.distanceToSqr(x, y, z);
             if (dist <= 100.0 * 100.0) {
-                float strength = Mth.clamp(1.0F - (float)Math.sqrt(dist) / 100.0F, .15F, 1.0F);
-                HeatNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> nearby), new ShakePacket(18 + (int)(strength * 24), strength * 4.7F));
+                float strength = Mth.clamp(1.0F - (float) Math.sqrt(dist) / 100.0F, .15F, 1.0F);
+                HeatNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> nearby), new ShakePacket(18 + (int) (strength * 24), strength * 4.7F));
             }
         }
     }
@@ -148,13 +166,12 @@ public final class HeatOverdriveManager {
         BlockPos base = player.blockPosition();
         List<RuptureTarget> veryClose = new ArrayList<>();
         List<RuptureTarget> close = new ArrayList<>();
-
         int[] radii = {2, 3, 4, 5, 6, 7, 8, 10, 12};
+
         for (int radius : radii) {
             scanShell(level, base, radius, veryClose, close);
             if (radius <= 6 && !veryClose.isEmpty()) break;
         }
-
         if (!veryClose.isEmpty()) {
             Collections.shuffle(veryClose);
             return veryClose.get(random.nextInt(veryClose.size()));
@@ -166,21 +183,21 @@ public final class HeatOverdriveManager {
             int dy = random.nextInt(15) - 7;
             int dz = random.nextInt(25) - 12;
             if (dx * dx + dy * dy + dz * dz < 9) continue;
-            RuptureTarget t = evaluateSurface(level, base.offset(dx, dy, dz), base);
-            if (t != null) return t;
+            RuptureTarget target = evaluateSurface(level, base.offset(dx, dy, dz), base);
+            if (target != null) return target;
         }
         return null;
     }
 
-    private static void scanShell(ServerLevel level, BlockPos base, int r, List<RuptureTarget> veryClose, List<RuptureTarget> close) {
-        for (int dx = -r; dx <= r; dx++) {
-            for (int dy = -Math.min(r, 5); dy <= Math.min(r, 5); dy++) {
-                for (int dz = -r; dz <= r; dz++) {
+    private static void scanShell(ServerLevel level, BlockPos base, int radius, List<RuptureTarget> veryClose, List<RuptureTarget> close) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -Math.min(radius, 5); dy <= Math.min(radius, 5); dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
                     int max = Math.max(Math.max(Math.abs(dx), Math.abs(dy)), Math.abs(dz));
-                    if (max != r) continue;
-                    RuptureTarget t = evaluateSurface(level, base.offset(dx, dy, dz), base);
-                    if (t == null) continue;
-                    if (r <= 6) veryClose.add(t); else close.add(t);
+                    if (max != radius) continue;
+                    RuptureTarget target = evaluateSurface(level, base.offset(dx, dy, dz), base);
+                    if (target == null) continue;
+                    if (radius <= 6) veryClose.add(target); else close.add(target);
                 }
             }
         }
@@ -208,9 +225,7 @@ public final class HeatOverdriveManager {
 
     private static boolean isSolidRuptureFace(ServerLevel level, BlockPos pos, BlockState state) {
         if (state.isAir() || state.getDestroySpeed(level, pos) < 0) return false;
-        if (!state.canOcclude()) return false;
-        if (state.is(BlockTags.LEAVES)) return false;
-        if (level.getBlockEntity(pos) != null) return false;
+        if (!state.canOcclude() || state.is(BlockTags.LEAVES) || level.getBlockEntity(pos) != null) return false;
         return !state.is(Blocks.GLASS)
                 && !state.is(Blocks.GLASS_PANE)
                 && !state.is(Blocks.IRON_BARS)
@@ -243,7 +258,6 @@ public final class HeatOverdriveManager {
         Direction inward = target.outward().getOpposite();
         BlockPos mainCenter = target.pos().relative(inward, 1);
         carveIrregularSphere(level, mainCenter, radius, random);
-
         int gouges = 1 + random.nextInt(3);
         for (int i = 0; i < gouges; i++) {
             int spread = Math.max(2, radius - 1);
@@ -276,30 +290,29 @@ public final class HeatOverdriveManager {
         int attempts = 12 + radius * 4;
         for (int i = 0; i < attempts; i++) {
             int spread = radius + 1;
-            BlockPos p = center.offset(
+            BlockPos pos = center.offset(
                     random.nextInt(spread * 2 + 1) - spread,
                     random.nextInt(spread * 2 + 1) - spread,
                     random.nextInt(spread * 2 + 1) - spread
             );
-            if (!level.hasChunkAt(p)) continue;
-            BlockState state = level.getBlockState(p);
+            if (!level.hasChunkAt(pos)) continue;
+            BlockState state = level.getBlockState(pos);
             if (!state.isAir() && !state.canBeReplaced()) continue;
 
             int solidFaces = 0;
             for (Direction dir : Direction.values()) {
-                BlockState neighbor = level.getBlockState(p.relative(dir));
+                BlockState neighbor = level.getBlockState(pos.relative(dir));
                 if (!neighbor.isAir() && neighbor.getFluidState().isEmpty()) solidFaces++;
             }
             if (solidFaces > 0 && random.nextFloat() < .34F) {
-                level.setBlock(p, Blocks.LAVA.defaultBlockState(), 3);
-                level.sendParticles(ParticleTypes.LAVA, p.getX() + .5, p.getY() + .5, p.getZ() + .5, 6, .45, .7, .45, .16);
+                level.setBlock(pos, Blocks.LAVA.defaultBlockState(), 3);
+                level.sendParticles(ParticleTypes.LAVA, pos.getX() + .5, pos.getY() + .5, pos.getZ() + .5, 6, .45, .7, .45, .16);
             }
         }
     }
 
     private static void seedLavaCore(ServerLevel level, RuptureTarget target, int radius, RandomSource random) {
         if (random.nextFloat() > .55F) return;
-
         Direction inward = target.outward().getOpposite();
         BlockPos core = target.pos().relative(inward, Math.max(1, radius / 2));
         int coreRadius = radius >= 5 ? 2 : 1;
@@ -310,14 +323,13 @@ public final class HeatOverdriveManager {
             for (int dz = -coreRadius; dz <= coreRadius && placed < maxSources; dz++) {
                 if (dx * dx + dz * dz > coreRadius * coreRadius) continue;
                 for (int dy = -1; dy <= 1; dy++) {
-                    BlockPos p = core.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(p)) continue;
-                    BlockState state = level.getBlockState(p);
+                    BlockPos pos = core.offset(dx, dy, dz);
+                    if (!level.hasChunkAt(pos)) continue;
+                    BlockState state = level.getBlockState(pos);
                     if (!state.isAir() && !state.canBeReplaced()) continue;
-
-                    BlockState below = level.getBlockState(p.below());
+                    BlockState below = level.getBlockState(pos.below());
                     if (!below.isAir() && below.getFluidState().isEmpty() && random.nextFloat() < .35F) {
-                        level.setBlock(p, Blocks.LAVA.defaultBlockState(), 3);
+                        level.setBlock(pos, Blocks.LAVA.defaultBlockState(), 3);
                         placed++;
                         break;
                     }
@@ -348,8 +360,7 @@ public final class HeatOverdriveManager {
 
     private static boolean canRupture(ServerLevel level, BlockPos pos, BlockState state) {
         if (state.isAir() || state.getDestroySpeed(level, pos) < 0) return false;
-        if (level.getBlockEntity(pos) != null) return false;
-        if (state.is(BlockTags.WITHER_IMMUNE)) return false;
+        if (level.getBlockEntity(pos) != null || state.is(BlockTags.WITHER_IMMUNE)) return false;
         return !state.is(Blocks.BEDROCK)
                 && !state.is(Blocks.BARRIER)
                 && !state.is(Blocks.END_PORTAL)
@@ -369,22 +380,22 @@ public final class HeatOverdriveManager {
         BlockPos base = player.blockPosition();
         int changed = 0;
         for (int attempt = 0; attempt < 28 && changed < 1; attempt++) {
-            BlockPos p = base.offset(random.nextInt(49) - 24, random.nextInt(19) - 9, random.nextInt(49) - 24);
-            if (!level.hasChunkAt(p) || !level.getFluidState(p).is(Fluids.WATER)) continue;
+            BlockPos pos = base.offset(random.nextInt(49) - 24, random.nextInt(19) - 9, random.nextInt(49) - 24);
+            if (!level.hasChunkAt(pos) || !level.getFluidState(pos).is(Fluids.WATER)) continue;
             int radius = 2 + random.nextInt(2);
             for (int dx = -radius; dx <= radius; dx++) {
                 for (int dz = -radius; dz <= radius; dz++) {
                     if (dx * dx + dz * dz > radius * radius) continue;
                     for (int dy = -1; dy <= 1; dy++) {
-                        BlockPos q = p.offset(dx, dy, dz);
-                        if (level.hasChunkAt(q) && level.getFluidState(q).is(Fluids.WATER) && random.nextFloat() < .65F) {
-                            level.setBlock(q, Blocks.LAVA.defaultBlockState(), 3);
+                        BlockPos target = pos.offset(dx, dy, dz);
+                        if (level.hasChunkAt(target) && level.getFluidState(target).is(Fluids.WATER) && random.nextFloat() < .65F) {
+                            level.setBlock(target, Blocks.LAVA.defaultBlockState(), 3);
                         }
                     }
                 }
             }
-            level.sendParticles(ParticleTypes.CLOUD, p.getX() + .5, p.getY() + 1.0, p.getZ() + .5, 45, 2.3, 1.2, 2.3, .09);
-            level.sendParticles(ParticleTypes.LAVA, p.getX() + .5, p.getY() + 1.0, p.getZ() + .5, 12, 1.5, 1.1, 1.5, .16);
+            level.sendParticles(ParticleTypes.CLOUD, pos.getX() + .5, pos.getY() + 1.0, pos.getZ() + .5, 45, 2.3, 1.2, 2.3, .09);
+            level.sendParticles(ParticleTypes.LAVA, pos.getX() + .5, pos.getY() + 1.0, pos.getZ() + .5, 12, 1.5, 1.1, 1.5, .16);
             changed++;
         }
     }
@@ -408,8 +419,14 @@ public final class HeatOverdriveManager {
     private static void tryIgnite(ServerLevel level, BlockPos pos, RandomSource random) {
         if (!level.hasChunkAt(pos)) return;
         BlockState state = level.getBlockState(pos);
-        boolean flammable = state.is(BlockTags.LOGS) || state.is(BlockTags.LOGS_THAT_BURN) || state.is(BlockTags.LEAVES) || state.is(BlockTags.PLANKS) || state.is(BlockTags.WOOL) || state.isFlammable(level, pos, Direction.UP);
+        boolean flammable = state.is(BlockTags.LOGS)
+                || state.is(BlockTags.LOGS_THAT_BURN)
+                || state.is(BlockTags.LEAVES)
+                || state.is(BlockTags.PLANKS)
+                || state.is(BlockTags.WOOL)
+                || state.isFlammable(level, pos, Direction.UP);
         if (!flammable) return;
+
         Direction[] directions = Direction.values();
         for (int tries = 0; tries < 6; tries++) {
             BlockPos firePos = pos.relative(directions[random.nextInt(directions.length)]);
