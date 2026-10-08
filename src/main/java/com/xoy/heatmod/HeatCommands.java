@@ -23,12 +23,12 @@ public final class HeatCommands {
                 .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("overdrive")
                         .then(Commands.literal("start").executes(ctx -> {
-                            HeatOverdriveManager.start(ctx.getSource().getServer());
+                            HeatSequenceController.start(ctx.getSource().getServer());
                             ctx.getSource().sendSuccess(() -> Component.literal("Heat Overdrive started."), true);
                             return 1;
                         }))
                         .then(Commands.literal("stop").executes(ctx -> {
-                            HeatOverdriveManager.stop(ctx.getSource().getServer());
+                            HeatSequenceController.stop(ctx.getSource().getServer());
                             ctx.getSource().sendSuccess(() -> Component.literal("Heat Overdrive stopped."), true);
                             return 1;
                         }))
